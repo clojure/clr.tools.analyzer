@@ -3,6 +3,12 @@
 (ns clojure.clr.tools.analyzer
   "Interface to Compiler's analyze.
   Entry point `analyze-path` and `analyze-one`"
+  (:require [clojure.reflect :as reflect]
+            [clojure.clr.io :as io]
+            [clojure.repl :as repl]
+            [clojure.string :as string]
+            [clojure.set :as set]
+            [clojure.clr.tools.analyzer.util])
   (:import (System.IO TextReader)
            (System.Reflection BindingFlags)
            (clojure.lang RT Compiler LineNumberingTextReader)
@@ -17,13 +23,8 @@
              MapExpr IfExpr KeywordInvokeExpr InstanceFieldExpr InstanceOfExpr
              CaseExpr Expr SetExpr MethodParamExpr KeywordExpr
              ConstantExpr NumberExpr NilExpr BooleanExpr StringExpr
-             ObjMethod ParserContext RHC)
-           (clojure.reflect Field))
-  (:require [clojure.reflect :as reflect]
-            [clojure.clr.io :as io]
-            [clojure.repl :as repl]
-            [clojure.string :as string]
-            [clojure.clr.tools.analyzer.util]))
+             ObjMethod ParserContext RHC HostArg)
+           (clojure.reflect Field)))
 
 (def CHILDREN (atom false))
 (def JAVA-OBJ (atom false))
@@ -86,9 +87,10 @@
                     first)
         _ (assert clj-field)
         reflect-flags (.flags clj-field)
-        binding-flags (set (->> reflect-flags
-                             (map reflect-flag->BindingFlags)
-                             (remove nil?)))
+        binding-flags (set/union (set (->> reflect-flags
+                                        (map reflect-flag->BindingFlags)
+                                        (remove nil?)))
+                                 #{BindingFlags/NonPublic BindingFlags/Public})
         binding-flags (if (:static reflect-flags)
                         binding-flags
                         (conj binding-flags BindingFlags/Instance))
@@ -807,6 +809,17 @@
          :env env
          :class (.ClrType expr)
          :can-emit-primitive (.CanEmitPrimitive expr)}
+        (when @JAVA-OBJ
+          {:Expr-obj expr}))))
+
+  HostArg
+  (analysis->map
+    [expr env]
+    (let []
+      (merge
+        {:op :host-arg
+         :env env
+         :expr (analysis->map (.ArgExpr expr) env)}
         (when @JAVA-OBJ
           {:Expr-obj expr})))))
 
