@@ -22,7 +22,8 @@
   (:require [clojure.reflect :as reflect]
             [clojure.clr.io :as io]
             [clojure.repl :as repl]
-            [clojure.string :as string]))
+            [clojure.string :as string]
+            [clojure.clr.tools.analyzer.util]))
 
 (def CHILDREN (atom false))
 (def JAVA-OBJ (atom false))
