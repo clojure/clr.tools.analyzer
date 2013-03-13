@@ -1,5 +1,5 @@
 (ns clojure.clr.tools.analyzer.emit-form
-  (:require [clojure.jvm.tools.analyzer :refer [ast]]))
+  (:require [clojure.clr.tools.analyzer :refer [ast]]))
 
 (def emit-default ::emit-default)
 
