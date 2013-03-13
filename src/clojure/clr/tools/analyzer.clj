@@ -1,9 +1,10 @@
-#_(set! *warn-on-reflection* true)
+(set! *warn-on-reflection* true)
 
 (ns clojure.clr.tools.analyzer
   "Interface to Compiler's analyze.
   Entry point `analyze-path` and `analyze-one`"
   (:import (System.IO TextReader)
+           (System.Reflection BindingFlags)
            (clojure.lang RT Compiler LineNumberingTextReader)
            (clojure.lang.CljCompiler.Ast
              DefExpr LocalBinding BindingInit LetExpr
@@ -16,7 +17,8 @@
              MapExpr IfExpr KeywordInvokeExpr InstanceFieldExpr InstanceOfExpr
              CaseExpr Expr SetExpr MethodParamExpr KeywordExpr
              ConstantExpr NumberExpr NilExpr BooleanExpr StringExpr
-             ObjMethod ParserContext RHC))
+             ObjMethod ParserContext RHC)
+           (clojure.reflect Field))
   (:require [clojure.reflect :as reflect]
             [clojure.clr.io :as io]
             [clojure.repl :as repl]
@@ -60,7 +62,7 @@
    (assert (symbol? class-obj))
    (assert (resolve class-obj) (str "Class " class-obj " cannot be resolved"))
    (let [{class-flags :flags :keys [members]} (reflect/reflect (resolve class-obj))
-         field-flags (when-let [f (some #(and (= (.name %) field) %) members)]
+         field-flags (when-let [^Field f (some #(and (when (instance? Field %) (= (.name ^Field %) field)) %) members)]
                        ;FIXME it doesn't seem like ClojureCLR lets me use :flags here. Needs investigation.
                        (.flags f))]
      (assert field-flags
@@ -70,10 +72,33 @@
              (str "Class " (resolve class-obj) " and field " field " is already public")))
    `(field-accessor ~class-obj '~field ~obj)))
 
-(defn- field-accessor [^Type class-obj field obj]
-  (let [^System.Reflection.FieldInfo 
-        field (.GetField class-obj (name field))]
-    (.GetValue field)))
+(def reflect-flag->BindingFlags
+  {:private BindingFlags/NonPublic
+   :public BindingFlags/Public
+   :static BindingFlags/Static})
+
+(defn- field-accessor [^Type class-obj field-sym obj]
+  (let [^Field
+        clj-field (->> (reflect/reflect class-obj)
+                    :members
+                    (filter #(when (instance? Field %) (= (.name ^Field %) field-sym)))
+                    first)
+        _ (assert clj-field)
+        reflect-flags (.flags clj-field)
+        binding-flags (set (->> reflect-flags
+                             (map reflect-flag->BindingFlags)
+                             (remove nil?)))
+        binding-flags (if (:static reflect-flags)
+                        binding-flags
+                        (conj binding-flags BindingFlags/Instance))
+
+        bfs-bit-or (apply enum-or binding-flags)
+
+        ^System.Reflection.FieldInfo 
+        field (.GetField class-obj (name field-sym) bfs-bit-or)]
+    (if field
+      (.GetValue field obj)
+      (throw (Exception. (str "Class " class-obj " does not contain field " field-sym))))))
 
 #_(defn- method-accessor [^Class class-obj method obj types & args]
   (let [^java.lang.reflect.Method 
@@ -318,7 +343,7 @@
   NewExpr
   (analysis->map
     [expr env]
-    (let [args (map analysis->map (.args expr) (repeat env))]
+    (let [args (map analysis->map (field NewExpr _args expr) (repeat env))]
       (merge
         {:op :new
          :env env 
@@ -326,9 +351,9 @@
               ;(assoc env
         ;             :line (.line expr)
         ;             )
-         :ctor (when-let [ctor (.ctor expr)]
+         :ctor (when-let [ctor (field NewExpr _ctor expr)]
                  (@#'reflect/constructor->map ctor))
-         :class (.c expr)
+         :class (.ClrType expr)
          :args args}
         (when @CHILDREN
           {:children args})
@@ -341,7 +366,7 @@
     (merge
       {:op :empty-expr
        :env env
-       :coll (.coll expr)}
+       :coll (field EmptyExpr _coll expr)}
       (when @JAVA-OBJ
         {:Expr-obj expr})))
 
@@ -349,7 +374,7 @@
   SetExpr
   (analysis->map
     [expr env]
-    (let [keys (map analysis->map (.keys expr) (repeat env))]
+    (let [keys (map analysis->map (field SetExpr _keys expr) (repeat env))]
       (merge
         {:op :set
          :env env
@@ -363,7 +388,7 @@
   VectorExpr
   (analysis->map
     [expr env]
-    (let [args (map analysis->map (.args expr) (repeat env))]
+    (let [args (map analysis->map (field VectorExpr _args expr) (repeat env))]
       (merge
         {:op :vector
          :env env
@@ -377,7 +402,7 @@
   MapExpr
   (analysis->map
     [expr env]
-    (let [keyvals (map analysis->map (.keyvals expr) (repeat env))]
+    (let [keyvals (map analysis->map (.KeyVals expr) (repeat env))]
       (merge
         {:op :map
          :env env
@@ -473,7 +498,7 @@
     (merge
       {:op :the-var
        :env env
-       :var (.var expr)}
+       :var (field TheVarExpr _var expr)}
       (when @JAVA-OBJ
         {:Expr-obj expr})))
 
@@ -484,8 +509,8 @@
     (merge
       {:op :var
        :env env
-       :var (.var expr)
-       :tag (.tag expr)}
+       :var (.Var expr)
+       :tag (.Tag expr)}
       (when @JAVA-OBJ
         {:Expr-obj expr})))
 
@@ -497,7 +522,7 @@
       (merge
         {:op :unresolved-var
          :env env
-         :sym (.symbol expr)}
+         :sym (field UnresolvedVarExpr _symbol expr)}
         (when @JAVA-OBJ
           {:Expr-obj expr}))))
 
@@ -508,7 +533,7 @@
     (merge
       {:op :obj-expr
        :env env
-       :tag (.tag expr)}
+       :tag (field ObjExpr _tag expr)}
       (when @JAVA-OBJ
         {:Expr-obj expr})))
 
@@ -516,7 +541,7 @@
   NewInstanceMethod
   (analysis->map
     [obm env]
-    (let [body (analysis->map (.body obm) env)]
+    (let [body (analysis->map (field ObjMethod _body obm) env)]
       (merge
         {:op :new-instance-method
          :env (env-location env obm)
@@ -534,8 +559,8 @@
   FnMethod
   (analysis->map
     [obm env]
-    (let [body (analysis->map (.body obm) env)
-          required-params (map analysis->map (.reqParms obm) (repeat env))]
+    (let [body (analysis->map (field ObjMethod _body obm) env)
+          required-params (map analysis->map (field FnMethod _reqParms obm) (repeat env))]
       (merge
         {:op :fn-method
          :env env
@@ -543,7 +568,7 @@
          ;; Map LocalExpr@xx -> LocalExpr@xx
          ;;:locals (map analysis->map (keys (.locals obm)) (repeat env))
          :required-params required-params
-         :rest-param (let [rest-param (.restParm obm)]
+         :rest-param (let [rest-param (field FnMethod _restParm obm)]
                        (if rest-param
                          (analysis->map rest-param env)
                          rest-param))}
@@ -555,15 +580,15 @@
   FnExpr
   (analysis->map
     [expr env]
-    (let [methods (map analysis->map (.methods expr) (repeat env))]
+    (let [methods (map analysis->map (field ObjExpr _methods expr) (repeat env))]
       (merge
         {:op :fn-expr
          :env (env-location env expr)
          :methods methods
-         :variadic-method (when-let [variadic-method (.variadicMethod expr)]
+         :variadic-method (when-let [variadic-method (field FnExpr _variadicMethod expr)]
                             (analysis->map variadic-method env))
-         :tag (.tag expr)}
-        (when-let [nme (.thisName expr)]
+         :tag (field ObjExpr _tag expr)}
+        (when-let [nme (.Name expr)]
           {:name (symbol nme)})
         (when @CHILDREN
           {:children methods})
@@ -578,7 +603,7 @@
     (let [methods (map analysis->map (field ObjExpr _methods expr) (repeat env))]
       (merge
         {:op :deftype*
-         :name (symbol (.name expr))
+         :name (symbol (.Name expr))
          :env (env-location env expr)
          :methods methods
          ;:mmap (field NewInstanceExpr mmap expr)
@@ -618,8 +643,8 @@
   MetaExpr
   (analysis->map
     [expr env]
-    (let [meta (analysis->map (.meta expr) env)
-          the-expr (analysis->map (.expr expr) env)]
+    (let [meta (analysis->map (field MetaExpr _meta expr) env)
+          the-expr (analysis->map (field MetaExpr _expr expr) env)]
       (merge
         {:op :meta
          :env env
@@ -634,7 +659,7 @@
   BodyExpr
   (analysis->map
     [expr env]
-    (let [exprs (map analysis->map (.exprs expr) (repeat env))]
+    (let [exprs (map analysis->map (field BodyExpr _exprs expr) (repeat env))]
       (merge
         {:op :do
          :env (inherit-env (last exprs) env)
@@ -648,9 +673,9 @@
   IfExpr
   (analysis->map
     [expr env]
-    (let [test (analysis->map (.testExpr expr) env)
-          then (analysis->map (.thenExpr expr) env)
-          else (analysis->map (.elseExpr expr) env)]
+    (let [test (analysis->map (field IfExpr _testExpr expr) env)
+          then (analysis->map (field IfExpr _thenExpr expr) env)
+          else (analysis->map (field IfExpr _elseExpr expr) env)]
       (merge
         {:op :if
          :env (env-location env expr)
@@ -668,10 +693,10 @@
   CaseExpr
   (analysis->map
     [expr env]
-    (let [the-expr (analysis->map (.expr expr) env)
-          tests (map analysis->map (vals (.tests expr)) (repeat env))
-          thens (map analysis->map (vals (.thens expr)) (repeat env))
-          default (analysis->map (.defaultExpr expr) env)]
+    (let [the-expr (analysis->map (field CaseExpr _expr expr) env)
+          tests (map analysis->map (vals (field CaseExpr _tests expr)) (repeat env))
+          thens (map analysis->map (vals (field CaseExpr _thens expr)) (repeat env))
+          default (analysis->map (field CaseExpr _defaultExpr expr) env)]
       (merge
         {:op :case*
          :env (env-location env expr)
@@ -679,12 +704,12 @@
          :tests tests
          :thens thens
          :default default
-         :tests-hashes (keys (.tests expr))
-         :shift (.shift expr)
-         :mask (.mask expr)
-         :test-type (.testType expr)
-         :switch-type (.switchType expr)
-         :skip-check (.skipCheck expr)}
+         :tests-hashes (keys (field CaseExpr _tests expr))
+         :shift (field CaseExpr _shift expr)
+         :mask (field CaseExpr _mask expr)
+         :test-type (field CaseExpr _testType expr)
+         :switch-type (field CaseExpr _switchType expr)
+         :skip-check (field CaseExpr _skipCheck expr)}
         (when @CHILDREN
           {:children (concat [the-expr] tests thens [default])})
         (when @JAVA-OBJ
@@ -698,7 +723,7 @@
     (merge
       {:op :import*
        :env env
-       :class-str (.c expr)}
+       :class-str (field ImportExpr _c expr)}
        (when @JAVA-OBJ
          {:Expr-obj expr})))
 
@@ -706,8 +731,8 @@
   AssignExpr
   (analysis->map
     [expr env]
-    (let [target (analysis->map (.target expr) env)
-          val (analysis->map (.val expr) env)]
+    (let [target (analysis->map (field AssignExpr _target expr) env)
+          val (analysis->map (field AssignExpr _val expr) env)]
       (merge
         {:op :set!
          :env env
@@ -722,12 +747,12 @@
   TryExpr+CatchClause
   (analysis->map
     [ctch env]
-    (let [local-binding (analysis->map (.lb ctch) env)
-          handler (analysis->map (.handler ctch) env)]
+    (let [local-binding (analysis->map (field TryExpr+CatchClause _lb ctch) env)
+          handler (analysis->map (field TryExpr+CatchClause _handler ctch) env)]
       (merge
         {:op :catch
          :env env
-         :class (.c ctch)
+         :class (.Type ctch)
          :local-binding local-binding
          :handler handler}
         (when @CHILDREN
@@ -738,18 +763,19 @@
   TryExpr
   (analysis->map
     [expr env]
-    (let [try-expr (analysis->map (.tryExpr expr) env)
-          finally-expr (when-let [finally-expr (.finallyExpr expr)]
+    (let [try-expr (analysis->map (field TryExpr _tryExpr expr) env)
+          finally-expr (when-let [finally-expr (field TryExpr _finallyExpr expr)]
                          (analysis->map finally-expr env))
-          catch-exprs (map analysis->map (.catchExprs expr) (repeat env))]
+          catch-exprs (map analysis->map (field TryExpr _catchExprs expr) (repeat env))]
       (merge
         {:op :try
          :env env
          :try-expr try-expr
          :finally-expr finally-expr
          :catch-exprs catch-exprs
-         :ret-local (.retLocal expr)
-         :finally-local (.finallyLocal expr)}
+         ;:ret-local (.retLocal expr)
+         ;:finally-local (.finallyLocal expr)
+         }
         (when @CHILDREN
           {:children (concat [try-expr] (when finally-expr [finally-expr]) catch-exprs)})
         (when @JAVA-OBJ
@@ -759,8 +785,8 @@
   RecurExpr
   (analysis->map
     [expr env]
-    (let [loop-locals (map analysis->map (.loopLocals expr) (repeat env))
-          args (map analysis->map (.args expr) (repeat env))]
+    (let [loop-locals (map analysis->map (field RecurExpr _loopLocals expr) (repeat env))
+          args (map analysis->map (field RecurExpr _args expr) (repeat env))]
       (merge
         {:op :recur
          :env (env-location env expr)
@@ -778,8 +804,8 @@
       (merge
         {:op :method-param
          :env env
-         :class (.getJavaClass expr)
-         :can-emit-primitive (.canEmitPrimitive expr)}
+         :class (.ClrType expr)
+         :can-emit-primitive (.CanEmitPrimitive expr)}
         (when @JAVA-OBJ
           {:Expr-obj expr})))))
 
