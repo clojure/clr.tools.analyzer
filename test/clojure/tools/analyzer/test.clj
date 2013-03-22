@@ -1,6 +1,6 @@
-(ns clojure.clr.tools.analyzer.test
+(ns clojure.tools.analyzer.test
   (:require [clojure.test :refer :all]
-            [clojure.clr.tools.analyzer :refer :all]))
+            [clojure.tools.analyzer :refer :all]))
 
 (deftest a-test
   (testing "FIXME, I fail."

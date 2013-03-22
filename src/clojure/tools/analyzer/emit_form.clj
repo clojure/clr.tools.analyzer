@@ -1,5 +1,5 @@
-(ns clojure.clr.tools.analyzer.emit-form
-  (:require [clojure.clr.tools.analyzer :refer [ast]]))
+(ns clojure.tools.analyzer.emit-form
+  (:require [clojure.tools.analyzer :refer [ast]]))
 
 (def emit-default ::emit-default)
 
@@ -24,13 +24,13 @@
 (defmethod map->form [:keyword emit-default] [{:keys [val]} _] val)
 
 (defmethod map->form [:static-method emit-default]
-  [{:keys [class method-name args]} mode] 
-  `(~(symbol (.getName class) (str method-name))
+  [{:keys [^Type class method-name args]} mode] 
+  `(~(symbol (.Name class) (str method-name))
        ~@(map #(map->form % mode) args)))
 
 (defmethod map->form [:static-field emit-default]
-  [{:keys [class field-name]} _]
-  (symbol (.getName class) (str field-name)))
+  [{:keys [^Type class field-name]} _]
+  (symbol (.Name class) (str field-name)))
 
 (defmethod map->form [:invoke emit-default]
   [{:keys [fexpr args]} mode]
@@ -55,8 +55,8 @@
        ~@(map #(map->form % mode) args)))
 
 (defmethod map->form [:new emit-default]
-  [{:keys [class args]} mode]
-  `(new ~(symbol (.getName class))
+  [{:keys [^Type class args]} mode]
+  `(new ~(symbol (.Name class))
         ~@(map #(map->form % mode) args)))
 
 (defmethod map->form [:empty-expr emit-default] [{:keys [coll]} _] coll)
@@ -117,8 +117,8 @@
   `(if ~@(map #(map->form % mode) [test then else])))
 
 (defmethod map->form [:instance-of emit-default]
-  [{:keys [class the-expr]} mode] 
-  `(clojure.core/instance? ~(symbol (.getName class))
+  [{:keys [^Type class the-expr]} mode] 
+  `(clojure.core/instance? ~(symbol (.Name class))
                            ~(map->form the-expr mode)))
 
 (defmethod map->form [:def emit-default]
@@ -164,8 +164,8 @@
            (when finally-expr [(list 'finally (map->form finally-expr mode))]))))
 
 (defmethod map->form [:catch emit-default]
-  [{:keys [class local-binding handler]} mode]
-  (list 'catch (symbol (.getName class))
+  [{:keys [^Type class local-binding handler]} mode]
+  (list 'catch (symbol (.Name class))
         (map->form local-binding mode) 
         (map->form handler mode)))
 
@@ -186,6 +186,9 @@
         test-type
         skip-check))
 
+(defmethod map->form [:host-arg emit-default]
+  [{:keys [expr]} mode]
+  (map->form expr))
 
 (comment
   (defmacro frm [f]

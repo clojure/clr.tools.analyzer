@@ -1,8 +1,8 @@
 (set! *warn-on-reflection* false)
 
-(ns clojure.clr.tools.analyzer.examples.reflection
+(ns clojure.tools.analyzer.examples.reflection
   "Same as *warn-on-reflection*"
-  (:require [clojure.clr.tools.analyzer :as analyze]))
+  (:require [clojure.tools.analyzer :as analyze]))
 
 (defn check-new [exp]
   (when (not (:ctor exp))

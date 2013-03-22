@@ -1,8 +1,8 @@
-(ns clojure.clr.tools.analyzer.hygienic
-  (:require [clojure.clr.tools.analyzer
+(ns clojure.tools.analyzer.hygienic
+  (:require [clojure.tools.analyzer
              [fold :refer [derive-default-fold add-fold-case fold-expr]]
              [emit-form :refer [map->form derive-emit-default]]]
-            [clojure.clr.tools.analyzer :refer [ast]]))
+            [clojure.tools.analyzer :refer [ast]]))
 
 (declare hygienic-emit hygienic-ast)
 

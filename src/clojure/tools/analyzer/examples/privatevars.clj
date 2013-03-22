@@ -1,5 +1,5 @@
-(ns clojure.clr.tools.analyzer.examples.privatevars
-  (:require [clojure.clr.tools.analyzer :as analyze]
+(ns clojure.tools.analyzer.examples.privatevars
+  (:require [clojure.tools.analyzer :as analyze]
             [clojure.set :as set]
             [clojure.pprint :as pp]))
 

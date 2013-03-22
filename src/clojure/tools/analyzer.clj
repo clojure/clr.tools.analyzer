@@ -1,6 +1,6 @@
 (set! *warn-on-reflection* true)
 
-(ns clojure.clr.tools.analyzer
+(ns clojure.tools.analyzer
   "Interface to Compiler's analyze.
   Entry point `analyze-path` and `analyze-one`"
   (:require [clojure.reflect :as reflect]
@@ -8,7 +8,7 @@
             [clojure.repl :as repl]
             [clojure.string :as string]
             [clojure.set :as set]
-            [clojure.clr.tools.analyzer.util])
+            [clojure.tools.analyzer.util])
   (:import (System.IO TextReader)
            (System.Reflection BindingFlags)
            (clojure.lang RT Compiler LineNumberingTextReader)
